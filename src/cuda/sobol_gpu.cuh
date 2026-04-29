@@ -4,8 +4,6 @@
 static constexpr int GPU_SOBOL_DIM  = 21;  
 static constexpr int GPU_SOBOL_BITS = 32;  
 
-extern __constant__ unsigned int d_V[GPU_SOBOL_DIM][GPU_SOBOL_BITS];
-
 void sobol_gpu_init(const unsigned int V_host[GPU_SOBOL_DIM][GPU_SOBOL_BITS]);
 
 __device__ void sobol_point_device(

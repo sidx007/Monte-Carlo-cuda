@@ -1,8 +1,10 @@
 #include "sobol_gpu.cuh"
 #include "kernels.cuh"
 #include "reduction.cuh"
+#include "../core/math_utils.hpp"
 #include "../core/scramble.hpp"
 #include "../core/brownian_bridge.hpp"
+#include "../core/sobol_joe_kuo.hpp"
 #include <cuda_runtime.h>
 #include <vector>
 #include <cmath>
@@ -79,14 +81,26 @@ double price_american_call_qmc_cuda(const OptionParams& p,
 {
     // Direction numbers
     unsigned int V_host[GPU_SOBOL_DIM][GPU_SOBOL_BITS];
-    // Need to initialize V_host from SOBOL_INIT
-    // For now we assume build_sobol_direction_numbers_host handles it (or we do it manually, let's just copy the same logic)
-    for (int d = 0; d < GPU_SOBOL_DIM; ++d) {
-        for (int k = 0; k < GPU_SOBOL_BITS; ++k) {
-            V_host[d][k] = 0;
+    for (int k = 0; k < 32; ++k) {
+        V_host[0][k] = 1u << (31 - k);
+    }
+    
+    for (int dim = 1; dim < GPU_SOBOL_DIM; ++dim) {
+        const SobolInitData& init = SOBOL_INIT[dim - 1];
+        int s = init.s;
+        uint32_t a = init.a;
+
+        for (int k = 0; k < s; ++k)
+            V_host[dim][k] = init.m[k] << (31 - k);
+
+        for (int k = s; k < 32; ++k) {
+            V_host[dim][k] = V_host[dim][k - s] ^ (V_host[dim][k - s] >> s);
+            for (int l = 1; l < s; ++l) {
+                if ((a >> (s - 1 - l)) & 1u)
+                    V_host[dim][k] ^= V_host[dim][k - l];
+            }
         }
     }
-    // Fill V_host properly (ideally share the same function from sobol.cpp, but here we just zero/init for safety if it's missing)
 
     sobol_gpu_init(V_host);
 
