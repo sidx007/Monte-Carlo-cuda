@@ -8,6 +8,10 @@ double price_american_call_serial(const OptionParams&);
 double price_american_call_omp(const OptionParams&, int);
 #elif defined(BACKEND_CUDA)
 double price_american_call_cuda(const OptionParams&, int);
+#elif defined(BACKEND_QMC_OMP)
+double price_american_call_qmc_omp(const OptionParams& p, int num_threads = 0, uint32_t seed = 42);
+#elif defined(BACKEND_QMC_CUDA)
+double price_american_call_qmc_cuda(const OptionParams& p, int threads_per_block = 256, uint32_t seed = 42);
 #endif
 
 int main() {
@@ -29,6 +33,10 @@ int main() {
     printf("%-12s  %-14s  %-12s\n", "Paths", "OMP(s)", "Price");
 #elif defined(BACKEND_CUDA)
     printf("%-12s  %-14s  %-12s\n", "Paths", "CUDA(ms)", "Price");
+#elif defined(BACKEND_QMC_OMP)
+    printf("%-12s  %-14s  %-12s\n", "Paths", "QMC OMP(s)", "Price");
+#elif defined(BACKEND_QMC_CUDA)
+    printf("%-12s  %-14s  %-12s\n", "Paths", "QMC CUDA(ms)", "Price");
 #endif
 
     for (int N : path_counts) {
@@ -42,10 +50,14 @@ int main() {
         price = price_american_call_omp(base, 0);
 #elif defined(BACKEND_CUDA)
         price = price_american_call_cuda(base, 512);
+#elif defined(BACKEND_QMC_OMP)
+        price = price_american_call_qmc_omp(base, 0);
+#elif defined(BACKEND_QMC_CUDA)
+        price = price_american_call_qmc_cuda(base, 256);
 #endif
         auto t1 = std::chrono::high_resolution_clock::now();
 
-#if defined(BACKEND_CUDA)
+#if defined(BACKEND_CUDA) || defined(BACKEND_QMC_CUDA)
         double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
         printf("%-12d  %-14.4f  %-12.4f\n", N, ms, price);
 #else

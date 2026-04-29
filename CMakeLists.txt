@@ -24,8 +24,16 @@ add_library(option_core STATIC
     src/core/black_scholes.cpp
     src/core/quasi_rng.cpp
     src/core/moro_inv_cnd.cpp
+    src/core/halton.cpp
+    src/core/sobol.cpp
+    src/core/scramble.cpp
+    src/core/brownian_bridge.cpp
+    src/core/halton.cpp
+    src/core/sobol.cpp
+    src/core/scramble.cpp
+    src/core/brownian_bridge.cpp
 )
-target_include_directories(option_core PUBLIC src/core)
+target_include_directories(option_core PUBLIC src)
 target_compile_options(option_core PRIVATE -O3 -march=native)
 
 # --- serial cpu ---
@@ -46,6 +54,15 @@ target_compile_options(american_omp PRIVATE -O3 -march=native)
 target_link_libraries(american_omp PRIVATE option_core OpenMP::OpenMP_CXX)
 target_compile_definitions(american_omp PRIVATE BACKEND_OMP)
 
+# --- openmp qmc ---
+add_executable(american_qmc_omp
+    src/openmp/american_option_qmc_omp.cpp
+    src/benchmark/main.cpp
+)
+target_compile_options(american_qmc_omp PRIVATE -fopenmp -O3 -march=native)
+target_link_libraries(american_qmc_omp PRIVATE option_core OpenMP::OpenMP_CXX)
+target_compile_definitions(american_qmc_omp PRIVATE BACKEND_QMC_OMP)
+
 # --- cuda ---
 if(HAVE_CUDA)
     add_executable(american_cuda
@@ -59,6 +76,19 @@ if(HAVE_CUDA)
     )
     target_link_libraries(american_cuda PRIVATE option_core CUDA::cudart)
     target_compile_definitions(american_cuda PRIVATE BACKEND_CUDA)
+
+    add_executable(american_qmc_cuda
+        src/cuda/sobol_gpu.cu
+        src/cuda/american_option_qmc.cu
+        src/benchmark/main.cpp
+    )
+    set_target_properties(american_qmc_cuda PROPERTIES CUDA_ARCHITECTURES "80")
+    target_compile_options(american_qmc_cuda PRIVATE
+        $<$<COMPILE_LANGUAGE:CUDA>:-O3 --use_fast_math --ptxas-options=-v -maxrregcount=40>
+        $<$<COMPILE_LANGUAGE:CXX>:-O3 -march=native>
+    )
+    target_link_libraries(american_qmc_cuda PRIVATE option_core CUDA::cudart)
+    target_compile_definitions(american_qmc_cuda PRIVATE BACKEND_QMC_CUDA)
 endif()
 
 # --- validation ---
