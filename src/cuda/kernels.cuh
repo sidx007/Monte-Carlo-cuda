@@ -13,7 +13,17 @@ float lcg_next(uint32_t& state) {
     return __uint2float_rn(state) * 2.3283064365386963e-10f;
 }
 
-__device__ double bs_call_device(double S, double X, double t, double v, double r);
+__device__ __forceinline__
+double cnd_device(double d);
+
+__device__ __forceinline__
+double bs_call_device(double S, double X, double t, double v, double r) {
+    if (t <= 0.0) return fmax(S - X, 0.0);
+    double sqt = sqrt(t);
+    double d1  = (log(S / X) + (r + 0.5 * v * v) * t) / (v * sqt);
+    double d2  = d1 - v * sqt;
+    return S * cnd_device(d1) - X * exp(-r * t) * cnd_device(d2);
+}
 
 __device__ __forceinline__
 double cnd_device(double d) {

@@ -4,7 +4,11 @@
 static constexpr int GPU_SOBOL_DIM  = 21;  
 static constexpr int GPU_SOBOL_BITS = 32;  
 
+#ifdef SOBOL_GPU_DEFINE_CONSTANTS
+__constant__ unsigned int d_V[GPU_SOBOL_DIM][GPU_SOBOL_BITS];
+#else
 extern __constant__ unsigned int d_V[GPU_SOBOL_DIM][GPU_SOBOL_BITS];
+#endif
 
 inline void sobol_gpu_init(const unsigned int V_host[GPU_SOBOL_DIM][GPU_SOBOL_BITS]) {
     cudaMemcpyToSymbol(d_V, V_host,
