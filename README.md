@@ -1,10 +1,12 @@
 # American Options Pricing — CUDA & OpenMP
 
-Reimplementation of *Cvetanoska & Stojanovski, "Using High Performance Computing and Monte Carlo Simulation for Pricing American Options"* with three backends sharing one math core:
+Reimplementation of *Cvetanoska & Stojanovski, "Using High Performance Computing and Monte Carlo Simulation for Pricing American Options"*, extended with true Quasi-Monte Carlo (QMC) backends sharing one math core:
 
-- **Serial CPU** — reference implementation
-- **OpenMP** — multi-core parallel
-- **CUDA** — GPU parallel (one thread per Monte Carlo path)
+- **Serial CPU** — reference implementation (LCG Pseudo-Random)
+- **OpenMP** — multi-core parallel (LCG)
+- **CUDA** — GPU parallel (LCG)
+- **QMC OpenMP** — True low-discrepancy QMC (Sobol + Brownian Bridge)
+- **QMC CUDA** — True low-discrepancy QMC on GPU
 
 ## Algorithm
 
@@ -20,10 +22,10 @@ See `build.md` for the full mathematical derivation.
 
 ```
 src/
-  core/       # shared math (BS formula, LCG, Moro inverse CND)
-  cpu/        # serial reference
-  openmp/     # OpenMP parallel
-  cuda/       # CUDA kernels and host launcher
+  core/       # shared math (BS formula, LCG, Moro, Sobol, Halton, BB, Scrambling)
+  cpu/        # serial pseudo-random reference
+  openmp/     # OpenMP parallel (both standard & QMC)
+  cuda/       # CUDA kernels and host launcher (both standard & QMC)
   benchmark/  # benchmark main()
 tests/
   validate.cpp
@@ -59,7 +61,9 @@ Checks:
 ```bash
 ./american_serial
 ./american_omp
-./american_cuda   # only if CUDA was built
+./american_qmc_omp
+./american_cuda       # only if CUDA was built
+./american_qmc_cuda   # only if CUDA was built
 ```
 
 Each prints a table over `N ∈ {10, 100, 1k, 10k, 100k, 200k, 300k, 500k, 1M}` paths with timing and price.
