@@ -36,16 +36,16 @@ __global__ void american_option_qmc_kernel(
     double payoff = 0.0;
 
     if (path_id < static_cast<unsigned int>(N)) {
-        float u_sobol[21];  
+        float u_sobol[GPU_SOBOL_DIM];  
         sobol_point_device(path_id, m, d_shift_u, d_directions, u_sobol);
 
-        double z[21];
+        double z[GPU_SOBOL_DIM];
         for (int d = 0; d < m; ++d) {
             float u = fmaxf(fminf(u_sobol[d], 1.0f - 1e-7f), 1e-7f);
             z[d] = static_cast<double>(moro_inv_cnd_device(u));
         }
 
-        double W[22];   
+        double W[GPU_SOBOL_DIM + 1];   
         W[0] = 0.0;
         for (int bb = 0; bb < m; ++bb) {
             int mid   = d_bb_mid[bb];
@@ -64,7 +64,7 @@ __global__ void american_option_qmc_kernel(
                        + d_bb_std[bb] * z[bb];
         }
 
-        double S[22];
+        double S[GPU_SOBOL_DIM + 1];
         S[0] = S0;
         for (int i = 1; i <= m; ++i) {
             double dW = W[i] - W[i - 1];
