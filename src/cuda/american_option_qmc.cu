@@ -9,9 +9,12 @@
 #include <vector>
 #include <cmath>
 
+extern __device__ unsigned int d_V[GPU_SOBOL_DIM * GPU_SOBOL_BITS];
+
 __global__ void american_option_qmc_kernel(
     double* __restrict__       d_result,
     const unsigned int* __restrict__ d_shift_u,
+    const unsigned int* __restrict__ d_directions,
     const double* __restrict__ d_bb_wl,
     const double* __restrict__ d_bb_wr,
     const double* __restrict__ d_bb_std,
@@ -24,7 +27,7 @@ __global__ void american_option_qmc_kernel(
 {
     extern __shared__ double sdata[];
 
-    int path = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int path_id = static_cast<unsigned int>(blockIdx.x * blockDim.x + threadIdx.x);
 
     const double dt       = T / static_cast<double>(m + 1);
     const double drift    = (r - 0.5 * v * v) * dt;
@@ -32,9 +35,9 @@ __global__ void american_option_qmc_kernel(
 
     double payoff = 0.0;
 
-    if (path < N) {
+    if (path_id < static_cast<unsigned int>(N)) {
         float u_sobol[21];  
-        sobol_point_device(static_cast<unsigned int>(path), m, d_shift_u, u_sobol);
+        sobol_point_device(path_id, m, d_shift_u, d_directions, u_sobol);
 
         double z[21];
         for (int d = 0; d < m; ++d) {
@@ -104,6 +107,9 @@ double price_american_call_qmc_cuda(const OptionParams& p,
 
     sobol_gpu_init(V_host);
 
+    unsigned int* d_dir_ptr = nullptr;
+    cudaGetSymbolAddress(reinterpret_cast<void**>(&d_dir_ptr), d_V);
+
     auto shifts_vec = make_digital_shift(p.m, seed);
     unsigned int* d_shift = nullptr;
     cudaMalloc(&d_shift, p.m * sizeof(unsigned int));
@@ -147,7 +153,7 @@ double price_american_call_qmc_cuda(const OptionParams& p,
     cudaMemset(d_result, 0, blocks * sizeof(double));
 
     american_option_qmc_kernel<<<blocks, threads_per_block, shared>>>(
-        d_result, d_shift,
+        d_result, d_shift, d_dir_ptr,
         d_bb_wl, d_bb_wr, d_bb_std, d_bb_mid, d_bb_left, d_bb_right,
         p.S0, p.X, p.T, p.r, p.v, p.m, p.N
     );

@@ -7,13 +7,24 @@ std::vector<BBNode> build_brownian_bridge(int m, double dt) {
     std::vector<BBNode> nodes;
     nodes.reserve(m);
 
+    if (m <= 0) return nodes;
+
+    BBNode endpoint;
+    endpoint.left = 0;
+    endpoint.right = 0;
+    endpoint.mid = m;
+    endpoint.w_l = 0.0;
+    endpoint.w_r = 0.0;
+    endpoint.std = std::sqrt(static_cast<double>(m) * dt);
+    nodes.push_back(endpoint);
+
     struct Interval { int l, r; };
     std::queue<Interval> q;
     q.push({0, m});
 
     while (!q.empty()) {
         auto [l, r] = q.front(); q.pop();
-        if (r - l < 1) continue;
+        if (r - l <= 1) continue;
         int mid = (l + r) / 2;
 
         double t_l   = l  * dt;

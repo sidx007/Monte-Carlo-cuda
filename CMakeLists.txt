@@ -69,7 +69,7 @@ if(HAVE_CUDA)
         src/cuda/american_option.cu
         src/benchmark/main.cpp
     )
-    set_target_properties(american_cuda PROPERTIES CUDA_ARCHITECTURES "native")
+    set_target_properties(american_cuda PROPERTIES CUDA_ARCHITECTURES "75;80;86")
     target_compile_options(american_cuda PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:-O3 --use_fast_math --ptxas-options=-v>
         $<$<COMPILE_LANGUAGE:CXX>:-O3 -march=native>
@@ -82,9 +82,9 @@ if(HAVE_CUDA)
         src/cuda/american_option_qmc.cu
         src/benchmark/main.cpp
     )
-    set_target_properties(american_qmc_cuda PROPERTIES CUDA_ARCHITECTURES "native")
+    set_target_properties(american_qmc_cuda PROPERTIES CUDA_ARCHITECTURES "75;80;86")
     target_compile_options(american_qmc_cuda PRIVATE
-        $<$<COMPILE_LANGUAGE:CUDA>:-O3 --use_fast_math --ptxas-options=-v -maxrregcount=40>
+        $<$<COMPILE_LANGUAGE:CUDA>:-O3 --use_fast_math --ptxas-options=-v --maxrregcount=64>
         $<$<COMPILE_LANGUAGE:CXX>:-O3 -march=native>
     )
     target_link_libraries(american_qmc_cuda PRIVATE option_core CUDA::cudart)

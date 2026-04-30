@@ -2,6 +2,10 @@
 #include <chrono>
 #include <cstdio>
 
+#if defined(BACKEND_CUDA) || defined(BACKEND_QMC_CUDA)
+#include <cuda_runtime.h>
+#endif
+
 #if defined(BACKEND_SERIAL)
 double price_american_call_serial(const OptionParams&);
 #elif defined(BACKEND_OMP)
@@ -37,6 +41,15 @@ int main() {
     printf("%-12s  %-14s  %-12s\n", "Paths", "QMC OMP(s)", "Price");
 #elif defined(BACKEND_QMC_CUDA)
     printf("%-12s  %-14s  %-12s\n", "Paths", "QMC CUDA(ms)", "Price");
+#endif
+
+#if defined(BACKEND_CUDA) || defined(BACKEND_QMC_CUDA)
+        {
+                double* warmup_buf = nullptr;
+                cudaMalloc(&warmup_buf, sizeof(double));
+                cudaFree(warmup_buf);
+                cudaDeviceSynchronize();
+        }
 #endif
 
     for (int N : path_counts) {
