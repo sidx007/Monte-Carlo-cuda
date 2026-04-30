@@ -10,9 +10,9 @@ std::vector<BBNode> build_brownian_bridge(int m, double dt) {
     if (m <= 0) return nodes;
 
     BBNode endpoint;
-    endpoint.left = 0;
-    endpoint.right = 0;
-    endpoint.mid = m;
+    endpoint.left = -1;
+    endpoint.right = -1;
+    endpoint.mid = m - 1;
     endpoint.w_l = 0.0;
     endpoint.w_r = 0.0;
     endpoint.std = std::sqrt(static_cast<double>(m) * dt);
@@ -20,16 +20,16 @@ std::vector<BBNode> build_brownian_bridge(int m, double dt) {
 
     struct Interval { int l, r; };
     std::queue<Interval> q;
-    q.push({0, m});
+    q.push({-1, m - 1});
 
     while (!q.empty()) {
         auto [l, r] = q.front(); q.pop();
         if (r - l <= 1) continue;
         int mid = (l + r + 1) / 2;
 
-        double t_l   = l  * dt;
-        double t_mid = mid * dt;
-        double t_r   = r  * dt;
+        double t_l   = (l + 1) * dt;
+        double t_mid = (mid + 1) * dt;
+        double t_r   = (r + 1) * dt;
 
         double span = t_r - t_l;
         BBNode node;
@@ -54,7 +54,15 @@ void apply_brownian_bridge(const double* z,
 
     for (int k = 0; k < static_cast<int>(bridge.size()); ++k) {
         const BBNode& b = bridge[k];
-        W[b.mid] = b.w_l * W[b.left] + b.w_r * W[b.right] + b.std * z[k];
+        double left_val = 0.0;
+        double right_val = 0.0;
+        if (b.w_l != 0.0 && b.left >= 0) {
+            left_val = W[b.left + 1];
+        }
+        if (b.w_r != 0.0 && b.right >= 0) {
+            right_val = W[b.right + 1];
+        }
+        W[b.mid + 1] = b.w_l * left_val + b.w_r * right_val + b.std * z[k];
     }
 }
 

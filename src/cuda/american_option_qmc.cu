@@ -51,9 +51,17 @@ __global__ void american_option_qmc_kernel(
             int mid   = d_bb_mid[bb];
             int left  = d_bb_left[bb];
             int right = d_bb_right[bb];
-            W[mid] = d_bb_wl[bb] * W[left]
-                   + d_bb_wr[bb] * W[right]
-                   + d_bb_std[bb] * z[bb];
+            double left_val = 0.0;
+            double right_val = 0.0;
+            if (d_bb_wl[bb] != 0.0 && left >= 0) {
+                left_val = W[left + 1];
+            }
+            if (d_bb_wr[bb] != 0.0 && right >= 0) {
+                right_val = W[right + 1];
+            }
+            W[mid + 1] = d_bb_wl[bb] * left_val
+                       + d_bb_wr[bb] * right_val
+                       + d_bb_std[bb] * z[bb];
         }
 
         double S[22];
