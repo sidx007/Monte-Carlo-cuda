@@ -25,7 +25,7 @@ std::vector<BBNode> build_brownian_bridge(int m, double dt) {
     while (!q.empty()) {
         auto [l, r] = q.front(); q.pop();
         if (r - l <= 1) continue;
-        int mid = (l + r) / 2;
+        int mid = (l + r + 1) / 2;
 
         double t_l   = l  * dt;
         double t_mid = mid * dt;

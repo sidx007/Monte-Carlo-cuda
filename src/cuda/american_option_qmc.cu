@@ -9,7 +9,7 @@
 #include <vector>
 #include <cmath>
 
-extern __device__ unsigned int d_V[GPU_SOBOL_DIM * GPU_SOBOL_BITS];
+unsigned int* get_d_V_ptr();
 
 __global__ void american_option_qmc_kernel(
     double* __restrict__       d_result,
@@ -107,8 +107,7 @@ double price_american_call_qmc_cuda(const OptionParams& p,
 
     sobol_gpu_init(V_host);
 
-    unsigned int* d_dir_ptr = nullptr;
-    cudaGetSymbolAddress(reinterpret_cast<void**>(&d_dir_ptr), d_V);
+    unsigned int* d_dir_ptr = get_d_V_ptr();
 
     auto shifts_vec = make_digital_shift(p.m, seed);
     unsigned int* d_shift = nullptr;
