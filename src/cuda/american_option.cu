@@ -1,94 +1,120 @@
 #include "kernels.cuh"
-#include "reduction.cuh"
+#include "lsm_gpu.h"
+#include "cuda_check.h"
+#include "../core/hd_math.hpp"
 #include "../core/math_utils.hpp"
 #include "american_cuda.h"
 #include <cuda_runtime.h>
-#include <device_launch_parameters.h>
-#include <cstdio>
+#include <chrono>
 #include <cstdint>
-#include <vector>
 #include <cmath>
 
-// ---------------- Main pricing kernel ----------------
-__global__ void american_option_kernel(
-    double* __restrict__ d_partial,
-    double S0, double X, double T,
-    double r,  double v,
+// ---------------- Path generation ----------------
+// One thread per path, writing TIME-MAJOR: S[i*N + path].
+//
+// LSM regresses across paths at each exercise date, so the path set has to be
+// materialised; the previous kernel kept it in a 64-double per-thread stack
+// array, which was possible only because the naive recursion consumed each path
+// in isolation.
+//
+// Every thread in a warp is at the same i on the same iteration, so writes land
+// on consecutive addresses and coalesce. The point-major layout this replaced
+// scattered them (m+1)*8 bytes apart, wasting 24 of every 32 bytes moved.
+template <typename T>
+__global__ void gen_paths_lcg_kernel(
+    T* __restrict__ S,
+    T S0, T drift, T vol_sqdt,
     int m, int N)
 {
-    extern __shared__ double sdata[];
-
     int path = blockIdx.x * blockDim.x + threadIdx.x;
+    if (path >= N) return;
 
-    const double dt       = T / static_cast<double>(m + 1);
-    const double sqdt     = sqrt(dt);
-    const double drift    = (r - 0.5 * v * v) * dt;
-    const double discount = exp(-r * dt);
+    uint32_t seed = static_cast<uint32_t>(path + 1) * 1234567u;
 
-    double payoff = 0.0;
-
-    if (path < N) {
-        uint32_t seed = static_cast<uint32_t>(path + 1) * 1234567u;
-
-        // Per-thread path buffer. Safe for m <= 63.
-        double S_path[64];
-        S_path[0] = S0;
-
-        #pragma unroll 1
-        for (int i = 1; i <= m; ++i) {
-            float  u = lcg_next(seed);
-            double z = static_cast<double>(moro_inv_cnd_device(u));
-            S_path[i] = S_path[i-1] * exp(drift + v * sqdt * z);
-        }
-
-        double c = bs_call_device(S_path[m - 1], X, dt, v, r);
-        for (int i = m - 1; i >= 1; --i) {
-            double continuation = c * discount;
-            double intrinsic    = S_path[i] - X;
-            c = fmax(intrinsic, continuation);
-        }
-
-        payoff = c;
-    }
-
-    double block_sum = block_reduce_sum(payoff, sdata);
-
-    if (threadIdx.x == 0) {
-        d_partial[blockIdx.x] = block_sum;
+    T s = S0;
+    S[path] = s;                                   // i = 0
+    for (int i = 1; i <= m; ++i) {
+        const T u = PathMath<T>::uniform(seed);
+        const T z = PathMath<T>::inv_cnd(u);
+        s *= PathMath<T>::expo(drift + vol_sqdt * z);
+        S[static_cast<size_t>(i) * N + path] = s;
     }
 }
 
 // ---------------- Host launcher ----------------
-double price_american_call_cuda(const OptionParams& p, int threads_per_block) {
-    int blocks = (p.N + threads_per_block - 1) / threads_per_block;
+double price_american_call_cuda(const OptionParams& p, int threads_per_block,
+                                double* out_stderr, CudaTiming* timing) {
+    if (out_stderr) *out_stderr = 0.0;
 
-    double* d_partial = nullptr;
-    cudaMalloc(&d_partial, blocks * sizeof(double));
-    cudaMemset(d_partial, 0, blocks * sizeof(double));
-
-    int num_warps = (threads_per_block + 31) / 32;
-    int shared_mem_bytes = num_warps * sizeof(double);
-
-    american_option_kernel<<<blocks, threads_per_block, shared_mem_bytes>>>(
-        d_partial,
-        p.S0, p.X, p.T,
-        p.r, p.v,
-        p.m, p.N
-    );
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        fprintf(stderr, "CUDA kernel launch error: %s\n", cudaGetErrorString(err));
-        cudaFree(d_partial);
+    if (p.m < 1 || p.m > CUDA_MAX_M) {
+        fprintf(stderr, "price_american_call_cuda: m=%d out of range (1..%d)\n",
+                p.m, CUDA_MAX_M);
         return 0.0;
     }
-    cudaDeviceSynchronize();
+    if (p.N <= 0 || threads_per_block <= 0) return 0.0;
 
-    std::vector<double> h_partial(blocks);
-    cudaMemcpy(h_partial.data(), d_partial, blocks * sizeof(double), cudaMemcpyDeviceToHost);
-    cudaFree(d_partial);
+    const int    stride   = p.m + 1;
+    const double dt       = p.T / static_cast<double>(p.m + 1);
+    const double drift    = (p.r - 0.5 * p.v * p.v) * dt;
+    const double vol_sqdt = p.v * std::sqrt(dt);
 
-    double total = 0.0;
-    for (double x : h_partial) total += x;
+    const auto t_start = std::chrono::high_resolution_clock::now();
 
-    return (total / static_cast<double>(p.N)) * std::exp(-p.r * p.T);
+    // Path storage precision. Float halves the footprint and, on a consumer GPU
+    // where FP64 runs at 1/64 rate, removes most of the path-generation cost.
+    // The regression itself stays double either way.
+    const bool use_float = (p.precision == MC_PRECISION_FLOAT);
+    const size_t elem = use_float ? sizeof(float) : sizeof(double);
+
+    void* d_S = nullptr;
+    const size_t bytes = static_cast<size_t>(p.N) * stride * elem;
+    CUDA_TRY(cudaMalloc(&d_S, bytes));
+
+    const auto t_setup = std::chrono::high_resolution_clock::now();
+
+    cudaEvent_t ev_begin, ev_gen, ev_end;
+    CUDA_TRY(cudaEventCreate(&ev_begin));
+    CUDA_TRY(cudaEventCreate(&ev_gen));
+    CUDA_TRY(cudaEventCreate(&ev_end));
+    CUDA_TRY(cudaEventRecord(ev_begin));
+
+    const int blocks = (p.N + threads_per_block - 1) / threads_per_block;
+    if (use_float) {
+        gen_paths_lcg_kernel<float><<<blocks, threads_per_block>>>(
+            static_cast<float*>(d_S), static_cast<float>(p.S0),
+            static_cast<float>(drift), static_cast<float>(vol_sqdt), p.m, p.N);
+    } else {
+        gen_paths_lcg_kernel<double><<<blocks, threads_per_block>>>(
+            static_cast<double*>(d_S), p.S0, drift, vol_sqdt, p.m, p.N);
+    }
+    CUDA_TRY_KERNEL();
+    CUDA_TRY(cudaEventRecord(ev_gen));
+
+    double lsm_ms = 0.0;
+    const double price = use_float
+        ? lsm_price_device(static_cast<const float*>(d_S), p, threads_per_block,
+                           out_stderr, &lsm_ms)
+        : lsm_price_device(static_cast<const double*>(d_S), p, threads_per_block,
+                           out_stderr, &lsm_ms);
+
+    CUDA_TRY(cudaEventRecord(ev_end));
+    CUDA_TRY(cudaEventSynchronize(ev_end));
+
+    if (timing) {
+        float kernel_ms = 0.0f, gen_ms = 0.0f;
+        cudaEventElapsedTime(&kernel_ms, ev_begin, ev_end);
+        cudaEventElapsedTime(&gen_ms, ev_begin, ev_gen);
+        const auto t_end = std::chrono::high_resolution_clock::now();
+        timing->setup_ms   = std::chrono::duration<double, std::milli>(t_setup - t_start).count();
+        timing->pathgen_ms = gen_ms;
+        timing->lsm_ms     = lsm_ms;
+        timing->kernel_ms  = kernel_ms;
+        timing->total_ms   = std::chrono::duration<double, std::milli>(t_end - t_start).count();
+    }
+    cudaEventDestroy(ev_begin);
+    cudaEventDestroy(ev_gen);
+    cudaEventDestroy(ev_end);
+
+    cudaFree(d_S);
+    return price;
 }
